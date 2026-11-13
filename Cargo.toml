@@ -44,9 +44,6 @@ tower = { version = "0.5", features = ["util"] }
 strip = true
 lto = "thin"
 
-
-
-
 # Macs get the Apple GPU (Metal) for speech; other platforms use the CPU for now.
 [features]
 # GPU through Vulkan (NVIDIA, AMD, Intel) for Windows and Linux; macOS already uses Metal.
