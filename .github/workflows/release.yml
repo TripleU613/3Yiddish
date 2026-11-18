@@ -47,7 +47,7 @@ jobs:
       # Windows: LunarG's installer, checked against a pinned SHA-256 and cached once installed.
       - if: matrix.vulkan && runner.os == 'Windows'
         id: vulkan-sdk
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: C:\VulkanSDK
           key: vulkan-sdk-windows-${{ env.VULKAN_SDK_VERSION }}
