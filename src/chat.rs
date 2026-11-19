@@ -42,7 +42,7 @@ pub fn platform() -> Option<&'static str> {
         ("linux", "x86_64") => "linux-x86_64",
         ("linux", "aarch64") => "linux-aarch64",
         ("macos", "aarch64") => "macos-aarch64",
-        ("macos", "x86_64") => "macos-x86_64",
+        // Intel Macs took minutes per answer in testing: no chat there for now.
         ("windows", "x86_64") if gpu => "windows-x86_64-vulkan",
         ("windows", "x86_64") => "windows-x86_64",
         _ => return None,
@@ -449,7 +449,8 @@ pub fn stop_stale() {
                 .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
                 .output()
         } else {
-            Command::new("ps").args(["-p", pid, "-o", "comm="]).output()
+            // The whole command line: on some systems the short name is cut off.
+            Command::new("ps").args(["-p", pid, "-o", "command="]).output()
         };
         let ours = name.is_ok_and(|out| {
             let text = String::from_utf8_lossy(&out.stdout);

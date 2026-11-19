@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-15, macos-15-intel, ubuntu-22.04]
+        os: [windows-latest, macos-15, ubuntu-22.04]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     env:
@@ -68,6 +68,8 @@ jobs:
           sleep 3; echo "helpers after a hard kill: $(helpers)"
           "$GITHUB_WORKSPACE/bin/3yiddish" --config fresh.toml serve > serve2.log 2>&1 & SERVE=$!
           sleep 8; echo "helpers after the next start: $(helpers)"
+          echo "pids file: $(cat state/chat/running 2>/dev/null || echo none)"; head -5 serve2.log
+          [[ $RUNNER_OS == Windows ]] || ps -A -o pid,command | grep -E "llama-server|3yiddish-transl" | grep -v grep | cut -c1-150 || true
           kill $SERVE 2>/dev/null || taskkill //PID $SERVE //F || true
           tail -5 state/chat/logs/thinker.log || true
           python3 -c "import json,sys; d=json.load(open('answer.json', encoding='utf-8')); sys.exit(0 if 'choices' in d else 1)"

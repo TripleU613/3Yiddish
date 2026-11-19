@@ -741,6 +741,8 @@ fn online(error: anyhow::Error) -> anyhow::Error {
 /// foreground (and says where it listens); the TUI starts it in the background when nothing
 /// is listening yet.
 async fn serve(config: Config, announce: bool) -> Result<()> {
+    // Chat helpers a crashed run left behind go first, before anything else can fail.
+    tokio::task::spawn_blocking(three_yiddish::chat::stop_stale).await?;
     let listen = config.listen;
     let app = App::new(config)?;
     // A phone link left on Tailscale by a run that ended badly is taken down first.
@@ -752,8 +754,6 @@ async fn serve(config: Config, announce: bool) -> Result<()> {
         eprintln!("3Yiddish listening on {listen}; request content and credentials are not logged");
     }
     let phone = app.phone_hub();
-    // Helpers a crashed run left behind go first.
-    tokio::task::spawn_blocking(three_yiddish::chat::stop_stale).await?;
     // Chat's helpers stop after ten quiet minutes, so an idle app holds no model in memory.
     tokio::spawn(async {
         loop {
