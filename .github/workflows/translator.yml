@@ -20,16 +20,26 @@ jobs:
           - { os: macos-15-intel, platform: macos-x86_64 }
           - { os: windows-latest, platform: windows-x86_64, ext: .exe }
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
       - if: runner.os == 'Linux'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq cmake clang
+        timeout-minutes: 15
+        run: |
+          for try in 1 2 3; do
+            timeout 240 sudo apt-get update -qq && timeout 300 sudo apt-get install -y -qq cmake clang && break
+            sleep 20
+          done
       - run: rustup toolchain install 1.98.0 --profile minimal && rustup default 1.98.0
       - name: Build
         shell: bash
         working-directory: workers/translation
         run: |
-          [[ "$RUNNER_OS" == Windows ]] && export CARGO_TARGET_DIR='C:\t'
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            export CARGO_TARGET_DIR='C:\t'
+            # The translation library links the C runtime statically; so must the rest.
+            export RUSTFLAGS="-C target-feature=+crt-static"
+          fi
           cargo build --release --locked
           mkdir -p ../../dist
           cp "${CARGO_TARGET_DIR:-target}/release/3yiddish-translate${{ matrix.ext }}" ../../dist/3yiddish-translate-${{ matrix.platform }}${{ matrix.ext }}

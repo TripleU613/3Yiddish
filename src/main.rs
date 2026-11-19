@@ -37,6 +37,8 @@ enum ModelAction {
     Status,
     /// Switch back to the previous model.
     Rollback,
+    /// Download chat (its thinking model, translator and their programs) to use it here.
+    Chat,
 }
 #[derive(Subcommand)]
 enum Command {
@@ -405,6 +407,21 @@ async fn main() -> Result<()> {
             }
             ModelAction::Rollback => {
                 println!("Now using {}", three_yiddish::model::rollback(&models)?);
+            }
+            ModelAction::Chat => {
+                let mut last = 101;
+                tokio::task::spawn_blocking(move || {
+                    three_yiddish::chat::pull(&mut |done, total| {
+                        let pct = done * 100 / total.max(1);
+                        if pct != last {
+                            last = pct;
+                            eprint!("\rChat: {pct}%   ");
+                        }
+                    })
+                })
+                .await??;
+                eprintln!();
+                println!("Chat is downloaded; open the app and click the chat button.");
             }
         }
         return Ok(());
