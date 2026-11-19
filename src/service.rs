@@ -161,7 +161,7 @@ impl App {
     fn schmooze_status(&self) -> Value {
         // Nothing set up by hand: chat is the downloaded one, when there is one.
         if self.config.schmooze.placeholder() && crate::chat::platform().is_some() {
-            return if crate::chat::installed().is_some() {
+            return if crate::chat::ready() {
                 json!({"status":"local","model":crate::chat::THINKER,"mode":"dedicated-translation","quality":"development-baseline"})
             } else {
                 json!({"status":"not-installed"})

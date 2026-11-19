@@ -77,9 +77,17 @@ pub struct Installed {
     pub server: PathBuf,
 }
 
+/// A quick look, for the status asked every second: a chat download is marked as in use.
+/// (`installed` checks every part.)
+pub fn ready() -> bool {
+    std::fs::read_to_string(root().join("current"))
+        .is_ok_and(|v| root().join(v.trim()).join("chat.json").is_file())
+}
+
 /// The chat in use, if it is all here.
 pub fn installed() -> Option<Installed> {
-    let root = root();
+    // Whole paths: the thinker is started from its own folder.
+    let root = std::path::absolute(root()).ok()?;
     let version = std::fs::read_to_string(root.join("current")).ok()?;
     let dir = root.join(version.trim());
     let manifest: Manifest =
@@ -305,15 +313,25 @@ pub fn ensure(gpu: bool) -> Result<(String, String)> {
         .stderr(std::fs::File::create(logs.join("translator.log"))?)
         .spawn()
         .context("Cannot start the translator")?;
-    let mut thinker = start_thinker(&parts, gpu, threads, &logs)?;
+    // Anything started is stopped again if the rest fails (dropping a Child would leave it).
+    let mut translator = Some(translator);
+    let mut thinker = match start_thinker(&parts, gpu, threads, &logs) {
+        Ok(started) => started,
+        Err(error) => {
+            if let Some(mut child) = translator.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            return Err(error);
+        }
+    };
     let mut running = Running {
-        thinker_url: String::new(),
+        thinker_url: format!("http://127.0.0.1:{}/v1/chat/completions", thinker.1),
         translate_url: format!("http://127.0.0.1:{translator_port}/v1/translate"),
         thinker: thinker.0,
-        translator,
+        translator: translator.take().context("No translator")?,
         used: Instant::now(),
     };
-    running.thinker_url = format!("http://127.0.0.1:{}/v1/chat/completions", thinker.1);
     let pids = format!("{} {}", running.thinker.id(), running.translator.id());
     let _ = std::fs::write(root().join("running"), pids);
     wait_ready(
@@ -334,7 +352,9 @@ pub fn ensure(gpu: bool) -> Result<(String, String)> {
         let _ = running.thinker.kill();
         let _ = running.thinker.wait();
         thinker = start_thinker(&parts, false, threads, &logs)?;
-        running.thinker = thinker.0;
+        // The old one is already stopped; this one replaces it in the guard.
+        let old = std::mem::replace(&mut running.thinker, thinker.0);
+        drop(old);
         running.thinker_url = format!("http://127.0.0.1:{}/v1/chat/completions", thinker.1);
         wait_ready(
             &mut running.thinker,
@@ -416,25 +436,32 @@ pub fn rest_if_idle(after: Duration) {
     }
 }
 
-/// Helpers left running by a run of the app that ended without stopping them.
-fn stop_stale() {
+/// Helpers left running by a run of the app that ended without stopping them (a crash).
+pub fn stop_stale() {
     let file = root().join("running");
     let Ok(pids) = std::fs::read_to_string(&file) else {
         return;
     };
     for pid in pids.split_whitespace() {
-        #[cfg(target_os = "linux")]
-        {
-            // Only our own helpers, never a process that reused the number.
-            let ours = std::fs::read_link(format!("/proc/{pid}/exe")).is_ok_and(|exe| {
-                let name = exe.to_string_lossy();
-                name.contains("llama-server") || name.contains("3yiddish-translate")
-            });
-            if ours {
-                let _ = Command::new("kill").arg(pid).status();
-            }
+        // Only our own helpers, never another program that reused the number.
+        let name = if cfg!(windows) {
+            Command::new("tasklist")
+                .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+                .output()
+        } else {
+            Command::new("ps").args(["-p", pid, "-o", "comm="]).output()
+        };
+        let ours = name.is_ok_and(|out| {
+            let text = String::from_utf8_lossy(&out.stdout);
+            text.contains("llama-server") || text.contains("3yiddish-transl")
+        });
+        if ours {
+            let _ = if cfg!(windows) {
+                Command::new("taskkill").args(["/PID", pid, "/F"]).status()
+            } else {
+                Command::new("kill").arg(pid).status()
+            };
         }
-        let _ = pid;
     }
     let _ = std::fs::remove_file(file);
 }

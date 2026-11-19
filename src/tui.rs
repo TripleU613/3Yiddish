@@ -4438,6 +4438,33 @@ mod tests {
         assert_eq!(again.input, "a draft");
     }
     #[test]
+    fn chat_is_offered_for_download_and_asks_first() {
+        let mut state = Screen::default();
+        // A fresh install: the service says chat runs here but is not downloaded.
+        state.status = Some(json!({"components": {"schmooze": {"status": "not-installed"}}}));
+        assert!(chat_offered(&state) && chat_missing(&state));
+        let draw = |state: &Screen| {
+            let mut term =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+            let mut hits = vec![];
+            term.draw(|f| hits = draw_plain(f, state)).unwrap();
+            (rendered_text(&term), hits)
+        };
+        // The chat button is in the top bar.
+        assert!(draw(&state).1.iter().any(|h| h.action == Click::Mode));
+        state.chat_size = Some(6_398_000_000);
+        state.chat_card = true;
+        let (text, hits) = draw(&state);
+        assert!(text.contains("Download chat?"), "{text}");
+        assert!(text.contains("about 6.4 GB"), "{text}");
+        assert!(hits.iter().any(|h| h.action == Click::GetChat));
+        assert!(hits.iter().any(|h| h.action == Click::ModelNotNow));
+        // Once downloaded, the same button switches to chat.
+        state.chat_card = false;
+        state.status = Some(json!({"components": {"schmooze": {"status": "local"}}}));
+        assert!(chat_offered(&state) && !chat_missing(&state));
+    }
+    #[test]
     fn a_model_is_downloaded_only_after_saying_yes() {
         let listing = |version: &str, label: &str, size: u64, installed| crate::model::Listing {
             version: version.into(),

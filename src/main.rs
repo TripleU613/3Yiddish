@@ -160,6 +160,32 @@ async fn response(response: reqwest::Response) -> Result<Value> {
 }
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Chat's helpers hold a model in memory: they end with the app even when it is ended from
+    // outside (its terminal closed, a kill), not only when it quits.
+    #[cfg(unix)]
+    tokio::spawn(async {
+        use tokio::signal::unix::{SignalKind, signal};
+        let (Ok(mut term), Ok(mut hup)) = (
+            signal(SignalKind::terminate()),
+            signal(SignalKind::hangup()),
+        ) else {
+            return;
+        };
+        tokio::select! {
+            _ = term.recv() => {}
+            _ = hup.recv() => {}
+        }
+        three_yiddish::chat::stop();
+        std::process::exit(143);
+    });
+    #[cfg(windows)]
+    tokio::spawn(async {
+        if let Ok(mut close) = tokio::signal::windows::ctrl_close()
+            && close.recv().await.is_some()
+        {
+            three_yiddish::chat::stop();
+        }
+    });
     // A bare `3yiddish` opens the app.
     let mut args: Vec<std::ffi::OsString> = std::env::args_os().collect();
     if args.len() == 1 {
@@ -726,6 +752,8 @@ async fn serve(config: Config, announce: bool) -> Result<()> {
         eprintln!("3Yiddish listening on {listen}; request content and credentials are not logged");
     }
     let phone = app.phone_hub();
+    // Helpers a crashed run left behind go first.
+    tokio::task::spawn_blocking(three_yiddish::chat::stop_stale).await?;
     // Chat's helpers stop after ten quiet minutes, so an idle app holds no model in memory.
     tokio::spawn(async {
         loop {
