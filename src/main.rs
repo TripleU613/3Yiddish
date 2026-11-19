@@ -709,6 +709,16 @@ async fn serve(config: Config, announce: bool) -> Result<()> {
         eprintln!("3Yiddish listening on {listen}; request content and credentials are not logged");
     }
     let phone = app.phone_hub();
+    // Chat's helpers stop after ten quiet minutes, so an idle app holds no model in memory.
+    tokio::spawn(async {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            let _ = tokio::task::spawn_blocking(|| {
+                three_yiddish::chat::rest_if_idle(std::time::Duration::from_secs(600))
+            })
+            .await;
+        }
+    });
     axum::serve(listener, router(app))
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
@@ -716,5 +726,6 @@ async fn serve(config: Config, announce: bool) -> Result<()> {
         .await?;
     // A paired phone's page goes off Tailscale with the service; its link is kept.
     phone.shutdown().await;
+    three_yiddish::chat::stop();
     Ok(())
 }
