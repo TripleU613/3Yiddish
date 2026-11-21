@@ -32,8 +32,29 @@ struct Engine {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Input {
-    text: String,
+    /// One text, answered as "text".
+    #[serde(default)]
+    text: Option<String>,
+    /// Several texts (an answer's sentences), translated together and answered as "texts".
+    #[serde(default)]
+    texts: Option<Vec<String>>,
     direction: String,
+}
+impl Input {
+    fn all(&self) -> Vec<&str> {
+        match (&self.text, &self.texts) {
+            (Some(t), None) => vec![t.as_str()],
+            (None, Some(ts)) => ts.iter().map(String::as_str).collect(),
+            _ => Vec::new(),
+        }
+    }
+    fn valid(&self) -> bool {
+        let all = self.all();
+        !all.is_empty()
+            && all.len() <= 32
+            && all.iter().all(|t| !t.trim().is_empty())
+            && all.iter().map(|t| t.chars().count()).sum::<usize>() <= 16000
+    }
 }
 struct Error(StatusCode, String);
 impl IntoResponse for Error {
@@ -56,22 +77,21 @@ impl Engine {
     fn translate(&self, input: Input) -> Result<Value> {
         let (source, target) = languages(&input.direction)?;
         ensure!(
-            !input.text.trim().is_empty() && input.text.chars().count() <= 16000,
-            "Text must contain 1..16000 characters"
+            input.valid(),
+            "Send 1..32 nonempty texts of up to 16000 characters in all"
         );
-        let mut tokens = vec![source.to_owned()];
-        tokens.extend(
-            self.tokenizer
-                .encode(&input.text)?
-                .into_iter()
-                .map(|p| p.piece),
-        );
-        tokens.push("</s>".into());
-        ensure!(
-            tokens.len() <= 512,
-            "Translation exceeds the 512-token source limit; shorten or split the message"
-        );
-        let source_tokens = tokens.len();
+        let mut batch = Vec::new();
+        for text in input.all() {
+            let mut tokens = vec![source.to_owned()];
+            tokens.extend(self.tokenizer.encode(text)?.into_iter().map(|p| p.piece));
+            tokens.push("</s>".into());
+            ensure!(
+                tokens.len() <= 512,
+                "Translation exceeds the 512-token source limit; shorten or split the message"
+            );
+            batch.push(tokens);
+        }
+        let source_tokens: usize = batch.iter().map(Vec::len).sum();
         let options: TranslationOptions<String, String> = TranslationOptions {
             beam_size: 4,
             max_input_length: 0,
@@ -80,48 +100,53 @@ impl Engine {
             ..Default::default()
         };
         let start = Instant::now();
-        let results = self.translator.translate_batch_with_target_prefix(
-            &[tokens],
-            &[vec![target]],
-            &options,
-            None,
-        )?;
-        let output = results
-            .first()
-            .and_then(|r| r.hypotheses.first())
-            .context("No translation returned")?;
-        ensure!(
-            output.last().is_some_and(|s| s == "</s>"),
-            "Translation reached its output limit; shorten the message"
-        );
-        let target_tokens = output.len();
-        let pieces: Vec<_> = output
-            .iter()
-            .filter(|s| {
-                !matches!(
-                    s.as_str(),
-                    "eng_Latn" | "ydd_Hebr" | "</s>" | "<s>" | "<pad>"
-                )
-            })
-            .collect();
-        let text = self.tokenizer.decode_pieces(&pieces)?;
-        ensure!(!text.trim().is_empty(), "Translation was empty");
-        Ok(
-            json!({"text":text,"model":"nllb600m-int8-local","direction":input.direction,"finish_reason":"stop","elapsed_ms":start.elapsed().as_millis(),"usage":{"prompt_tokens":source_tokens,"completion_tokens":target_tokens},"license":"CC-BY-NC-4.0"}),
-        )
+        let prefixes = vec![vec![target]; batch.len()];
+        let results = self
+            .translator
+            .translate_batch_with_target_prefix(&batch, &prefixes, &options, None)?;
+        let mut texts = Vec::new();
+        let mut target_tokens = 0;
+        for result in &results {
+            let output = result
+                .hypotheses
+                .first()
+                .context("No translation returned")?;
+            ensure!(
+                output.last().is_some_and(|s| s == "</s>"),
+                "Translation reached its output limit; shorten the message"
+            );
+            target_tokens += output.len();
+            let pieces: Vec<_> = output
+                .iter()
+                .filter(|s| {
+                    !matches!(
+                        s.as_str(),
+                        "eng_Latn" | "ydd_Hebr" | "</s>" | "<s>" | "<pad>"
+                    )
+                })
+                .collect();
+            let text = self.tokenizer.decode_pieces(&pieces)?;
+            ensure!(!text.trim().is_empty(), "Translation was empty");
+            texts.push(text);
+        }
+        ensure!(texts.len() == batch.len(), "A translation is missing");
+        let mut answer = json!({"model":"nllb1.3b-heimish-int8","direction":input.direction,"finish_reason":"stop","elapsed_ms":start.elapsed().as_millis(),"usage":{"prompt_tokens":source_tokens,"completion_tokens":target_tokens},"license":"CC-BY-NC-4.0"});
+        if input.texts.is_some() {
+            answer["texts"] = json!(texts);
+        } else {
+            answer["text"] = json!(texts[0]);
+        }
+        Ok(answer)
     }
 }
 async fn translate(
     State(engine): State<Arc<Engine>>,
     Json(input): Json<Input>,
 ) -> Result<Json<Value>, Error> {
-    if languages(&input.direction).is_err()
-        || input.text.trim().is_empty()
-        || input.text.chars().count() > 16000
-    {
+    if languages(&input.direction).is_err() || !input.valid() {
         return Err(Error(
             StatusCode::BAD_REQUEST,
-            "Use nonempty text up to 16000 characters and direction en-yi or yi-en".into(),
+            "Use text, or texts (up to 32), nonempty and up to 16000 characters in all, and direction en-yi or yi-en".into(),
         ));
     }
     let permit = engine.permit.clone().try_acquire_owned().map_err(|_| {
@@ -165,7 +190,7 @@ async fn main() -> Result<()> {
         tokenizer: SentencePieceProcessor::open(args.model.join("sentencepiece.bpe.model"))?,
         permit: Arc::new(Semaphore::new(1)),
     });
-    let app=Router::new().route("/healthz",get(||async{Json(json!({"status":"ready","model":"nllb600m-int8-local","license":"CC-BY-NC-4.0","runtime":"Rust/CTranslate2"}))})).route("/v1/translate",post(translate)).layer(DefaultBodyLimit::max(128*1024)).with_state(engine);
+    let app=Router::new().route("/healthz",get(||async{Json(json!({"status":"ready","model":"nllb1.3b-heimish-int8","license":"CC-BY-NC-4.0","runtime":"Rust/CTranslate2"}))})).route("/v1/translate",post(translate)).layer(DefaultBodyLimit::max(128*1024)).with_state(engine);
     let listener = tokio::net::TcpListener::bind(args.listen).await?;
     eprintln!(
         "Native translation ready on {}; request text is not logged",
@@ -186,5 +211,15 @@ mod tests {
         assert_eq!(languages("en-yi").unwrap(), ("eng_Latn", "ydd_Hebr"));
         assert_eq!(languages("yi-en").unwrap(), ("ydd_Hebr", "eng_Latn"));
         assert!(languages("he-yi").is_err());
+    }
+    #[test]
+    fn one_text_or_several_are_taken_but_not_both() {
+        let input = |v: Value| serde_json::from_value::<Input>(v).unwrap();
+        assert!(input(json!({"text":"a","direction":"en-yi"})).valid());
+        assert!(input(json!({"texts":["a","b"],"direction":"en-yi"})).valid());
+        assert!(!input(json!({"text":"a","texts":["b"],"direction":"en-yi"})).valid());
+        assert!(!input(json!({"texts":[],"direction":"en-yi"})).valid());
+        assert!(!input(json!({"texts":["a",""],"direction":"en-yi"})).valid());
+        assert!(!input(json!({"texts":vec!["a"; 33],"direction":"en-yi"})).valid());
     }
 }

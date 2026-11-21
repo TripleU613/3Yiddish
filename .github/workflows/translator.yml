@@ -17,7 +17,6 @@ jobs:
           - { os: ubuntu-22.04, platform: linux-x86_64 }
           - { os: ubuntu-22.04-arm, platform: linux-aarch64 }
           - { os: macos-15, platform: macos-aarch64 }
-          - { os: macos-15-intel, platform: macos-x86_64 }
           - { os: windows-latest, platform: windows-x86_64, ext: .exe }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90

@@ -290,6 +290,42 @@ impl App {
         self.translate_via(self.config.translation.as_ref(), text, direction)
             .await
     }
+    /// English sentences into Yiddish in one request: (the texts, the model). None when the
+    /// translator does not take several at once (an older one) or the answer does not fit, so
+    /// the caller goes one sentence at a time.
+    async fn translate_together(
+        &self,
+        endpoint: &Endpoint,
+        parts: &[&str],
+    ) -> Option<(Vec<String>, String)> {
+        let mut request = self
+            .client
+            .post(&endpoint.url)
+            .json(&json!({"texts": parts, "direction": "en-yi"}));
+        if let Ok(Some(key)) = endpoint.key() {
+            request = request.bearer_auth(key);
+        }
+        let response = request.send().await.ok()?;
+        if !response.status().is_success() {
+            return None;
+        }
+        let value: Value = response.json().await.ok()?;
+        let texts: Vec<String> = value["texts"]
+            .as_array()?
+            .iter()
+            .map(|t| t.as_str().unwrap_or_default().to_owned())
+            .collect();
+        (value["finish_reason"] == "stop"
+            && texts.len() == parts.len()
+            && texts.iter().all(|t| !t.trim().is_empty()))
+        .then(|| {
+            let model = value["model"]
+                .as_str()
+                .unwrap_or(&endpoint.model)
+                .to_owned();
+            (texts, model)
+        })
+    }
     /// Translate with this translator (None: the reasoning model translates).
     async fn translate_via(
         &self,
@@ -554,12 +590,33 @@ impl App {
         if already {
             text.push(heimish_spelling(&answer.text));
         }
-        for sentence in sentences(&answer.text).into_iter().filter(|_| !already) {
-            let translated = self.translate_via(translation, sentence, "en-yi").await?;
-            calls.push(
-                json!({"stage":"output_translation","model":translated.model,"usage":translated.usage}),
-            );
-            text.push(heimish_spelling(&translated.text));
+        let parts: Vec<&str> = if already {
+            Vec::new()
+        } else {
+            sentences(&answer.text)
+        };
+        // All sentences in one request when the translator takes several (faster); otherwise
+        // one at a time.
+        let together = match translation {
+            Some(endpoint) if parts.len() > 1 => self.translate_together(endpoint, &parts).await,
+            _ => None,
+        };
+        match together {
+            Some(done) => {
+                calls.push(
+                    json!({"stage":"output_translation","model":done.1,"sentences":parts.len()}),
+                );
+                text.extend(done.0.iter().map(|t| heimish_spelling(t)));
+            }
+            None => {
+                for sentence in parts {
+                    let translated = self.translate_via(translation, sentence, "en-yi").await?;
+                    calls.push(
+                        json!({"stage":"output_translation","model":translated.model,"usage":translated.usage}),
+                    );
+                    text.push(heimish_spelling(&translated.text));
+                }
+            }
         }
         let translated = Completion {
             text: text.join(" "),
