@@ -2,7 +2,7 @@
 
 How good is it? Honest numbers.
 
-Not the best yet. We tested 19 Yiddish speech-to-text tools and models on 25 takes of free heimish
+Not the best yet. We tested 21 Yiddish speech-to-text tools and models on 25 takes of free heimish
 speech (1,191 words): websites, programs and open models, paid and free.
 
 **Wrong words per 100** is the main number: lower is better, and it does not change when
@@ -14,7 +14,9 @@ more tools are added. The best in each column is bold.
 | Yiddish Tools | Paid website | 4.7 | 67.8 | 6 | 4 | 2 | 3 | **0** |
 | **3Yiddish, Whisper-based** | Free, on your own computer (in the app now) | 11.9 | 60.3 | 3 | 3 | 6 | 10 | 1 |
 | 3Yiddish, earlier model | Free, on your own computer (the app until 0.4.0) | 12.6 | 60.0 | 3 | 2 | 12 | 14 | 3 |
+| Gemini 4 Carbon | Paid AI model from Google (through OpenRouter) | 13.2 | 54.2 | 4 | 2 | 5 | 2 | **0** |
 | Devniks Voice | Free website | 13.5 | 61.1 | 4 | 4 | 5 | 6 | **0** |
+| Gemini 4 Argon | Paid AI model from Google (through OpenRouter) | 13.6 | 52.8 | 3 | 1 | 4 | 2 | **0** |
 | ivrit-ai turbo | Free open model | 15.6 | 56.1 | 2 | 2 | 10 | 13 | 1 |
 | **3Yiddish, Omnilingual-based** | Free, on your own computer (in the app now) | 16.0 | 58.0 | 4 | 4 | 9 | 8 | 3 |
 | ivrit-ai large-v3 | Free open model | 18.3 | 59.6 | 5 | 5 | 11 | 8 | 2 |
@@ -67,6 +69,10 @@ good small heimish model to download today.
   as shown.
 - Devniks Voice returns its own result plus a second pass through Google's Gemini; that
   combined result is what was scored.
+- Gemini got each take with one plain request: write word for word what is said, in Yiddish
+  letters, no translation. Argon with a longer instruction prompt did worse (16.4). Two other
+  Gemini 4 models, Neon and Hydrogen, are not in the table: on about half the takes they
+  kept thinking until the length limit and gave no transcript.
 - Red Flow takes a live microphone only, up to 30 seconds, so each take was played into
   it. Two takes ran slightly over and lost their last words.
 - Heimish Geredt stopped early or skipped a stretch in six takes, which counts as wrong
@@ -82,7 +88,7 @@ good small heimish model to download today.
   output as the plain Whisper rows: rough sound-spelling from one, German in Latin letters
   from the other.
 - Open models ran with the settings their authors give. 3Yiddish ran as the app runs it.
-- The two models in the app now were added last, and most of their words were judged by
+- The two models in the app now and the two Gemini models were added last, and most of their words were judged by
   AI agents, not the speaker. Their scores come from a later run with more tools in it,
   which moves scores a little; wrong words per 100 compares directly.
 
