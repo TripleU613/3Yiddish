@@ -35,7 +35,7 @@ hound = "3.5"
 # Unpacking the chat helper program (llama.cpp ships .tar.gz, and .zip on Windows).
 flate2 = "1"
 tar = "0.4"
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 symphonia = { version = "0.6", features = ["all"] }
 self-replace = "1.5"
 ratatui-image = { version = "11.1.0", default-features = false }
